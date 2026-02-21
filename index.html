@@ -418,19 +418,52 @@
             showModal(`<h2 class="text-xl font-black mb-4 text-indigo-900">History</h2><div class="max-h-96 overflow-y-auto"><table class="w-full text-left text-sm"><thead><tr class="bg-slate-50"><th class="p-3">Customer</th><th class="p-3">Slot</th><th class="p-3">Status</th></tr></thead><tbody>${list || '<tr><td colspan="3" class="p-6 text-center">No history</td></tr>'}</tbody></table></div>`);
         }
 
+        // --- UPDATED PENDING LOGIC ---
         function viewPendingList() {
             let list = '';
+            const today = new Date();
+            
             Object.keys(db.slots).forEach(id => {
                 const s = db.slots[id];
-                if (s.status === 'occupied') list += `<tr><td class="p-3 border-b">${id}</td><td class="p-3 border-b">${s.name}</td><td class="p-3 border-b text-red-500 font-bold">₹${s.rent}</td></tr>`;
+                if (s.status === 'occupied') {
+                    // Calculate months between Join Date and Today
+                    const joinDate = new Date(s.joinDate);
+                    const diffMonths = (today.getFullYear() - joinDate.getFullYear()) * 12 + (today.getMonth() - joinDate.getMonth());
+                    
+                    // Total Payable = (Monthly Rent * months elapsed) + Initial Advance/Deposit
+                    // Subtract Total Paid to get Current Pending
+                    const totalPayable = (parseInt(s.rent) * Math.max(0, diffMonths)) + parseInt(s.advance);
+                    const pendingAmt = totalPayable - parseInt(s.paid || 0);
+                    
+                    list += `<tr>
+                        <td class="p-3 border-b">${id}</td>
+                        <td class="p-3 border-b">${s.name}</td>
+                        <td class="p-3 border-b text-red-600 font-bold">₹${pendingAmt}</td>
+                    </tr>`;
+                }
             });
-            showModal(`<h3 class="text-xl font-black mb-4">Pending Rental List</h3><table class="w-full text-left text-sm"><thead><tr class="bg-slate-100"><th class="p-3">Slot</th><th class="p-3">Customer</th><th class="p-3">Rent/Mo</th></tr></thead><tbody>${list || '<tr><td colspan="3" class="p-6 text-center opacity-30">No active tenants</td></tr>'}</tbody></table>`);
+
+            showModal(`
+                <h3 class="text-xl font-black mb-4">Pending Rental List</h3>
+                <div class="max-h-96 overflow-y-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead>
+                            <tr class="bg-slate-100">
+                                <th class="p-3">Slot</th>
+                                <th class="p-3">Customer</th>
+                                <th class="p-3">Pending</th>
+                            </tr>
+                        </thead>
+                        <tbody>${list || '<tr><td colspan="3" class="p-6 text-center opacity-30">No active tenants</td></tr>'}</tbody>
+                    </table>
+                </div>
+            `);
         }
 
         function viewSlot(id) {
             const slot = db.slots[id];
             if (slot.status === 'vacant') return;
-            const months = Math.max(1, Math.ceil((new Date() - new Date(slot.joinDate)) / (1000*60*60*24*30)));
+            const months = Math.max(0, ((new Date().getFullYear() - new Date(slot.joinDate).getFullYear()) * 12 + (new Date().getMonth() - new Date(slot.joinDate).getMonth())));
             const pending = (months * parseInt(slot.rent)) + parseInt(slot.advance) - parseInt(slot.paid);
             showModal(`<h2 class="text-3xl font-black text-blue-900 text-center mb-1">${id}</h2><p class="text-center text-2xl font-black uppercase text-slate-800 mb-6">${slot.name}</p><div class="grid grid-cols-2 gap-4 text-sm mb-6 bg-slate-50 p-6 rounded-3xl"><div><span class="block text-[10px] opacity-50">Car</span><b>${slot.carNum}</b></div><div><span class="block text-[10px] opacity-50">Phone</span><b>${slot.phone}</b></div><div class="col-span-2 border-t pt-2"><span class="block text-[10px] opacity-50">Address</span><b>${slot.address || 'N/A'}</b></div><div class="text-blue-600 border-t pt-2"><span>Monthly Rent:</span> <b>₹${slot.rent}</b></div><div class="text-red-600 border-t pt-2"><span>Pending:</span> <b>₹${pending}</b></div></div>`);
         }
