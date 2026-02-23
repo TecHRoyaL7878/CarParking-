@@ -74,7 +74,8 @@
 
     <script>
         const STAFF_USERS = { "admin": "123", "manager": "456" };
-        let db = JSON.parse(localStorage.getItem('RP_DB')) || { slots: {}, applications: [] };
+        const UPDATE_PASSKEY = "1234";
+        let db = JSON.parse(localStorage.getItem('RP_DB')) || { slots: {}, applications: [], billHistory: [] };
         let activeUser = null;
 
         function updateClock() {
@@ -93,6 +94,7 @@
                 for(let i=1; i<=15; i++) db.slots[`Open ${i}`] = { status: 'vacant', type: 'Open' };
                 save();
             }
+            if(!db.billHistory) { db.billHistory = []; save(); }
         }
         function save() { localStorage.setItem('RP_DB', JSON.stringify(db)); }
 
@@ -112,10 +114,12 @@
 
         document.getElementById('customerLoginForm').onsubmit = (e) => {
             e.preventDefault();
-            const sId = document.getElementById('custSlotInput').value;
-            const phone = document.getElementById('custPhoneInput').value;
-            const slot = db.slots[sId];
-            if (slot && slot.phone === phone && slot.status === 'occupied') login('customer', sId); 
+            const inputSlot = document.getElementById('custSlotInput').value.trim();
+            const phone = document.getElementById('custPhoneInput').value.trim();
+            const slotKey = Object.keys(db.slots).find(k => k.toLowerCase() === inputSlot.toLowerCase());
+            const slot = slotKey ? db.slots[slotKey] : null;
+
+            if (slot && slot.phone === phone && slot.status === 'occupied') login('customer', slotKey); 
             else alert("Slot details not found or application not approved yet!");
         };
 
@@ -131,18 +135,15 @@
 
         document.getElementById('logoutBtn').onclick = () => location.reload();
 
-        function toggleAppDropdown() {
-            document.getElementById("appDropdown").classList.toggle("show");
-        }
+        function toggleAppDropdown() { document.getElementById("appDropdown").classList.toggle("show"); }
+        function toggleHistDropdown() { document.getElementById("histDropdown").classList.toggle("show"); }
 
         window.onclick = function(event) {
             if (!event.target.matches('.dropbtn')) {
                 var dropdowns = document.getElementsByClassName("dropdown-content");
                 for (var i = 0; i < dropdowns.length; i++) {
                     var openDropdown = dropdowns[i];
-                    if (openDropdown.classList.contains('show')) {
-                        openDropdown.classList.remove('show');
-                    }
+                    if (openDropdown.classList.contains('show')) openDropdown.classList.remove('show');
                 }
             }
         }
@@ -169,7 +170,20 @@
                                 </div>
                             </div>
                             <button onclick="openBillForm()" class="bg-green-600 text-white px-5 py-3 rounded-2xl font-bold">📄 Bill</button>
-                            <button onclick="viewRequestHistory()" class="bg-indigo-600 text-white px-5 py-3 rounded-2xl font-bold">History</button>
+                        ` : ''}
+                        
+                        <div class="relative inline-block">
+                            <button onclick="toggleHistDropdown()" class="dropbtn bg-indigo-600 text-white px-5 py-3 rounded-2xl font-bold flex items-center gap-2">
+                                History <svg class="w-4 h-4 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                            </button>
+                            <div id="histDropdown" class="dropdown-content absolute left-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 z-[60] overflow-hidden">
+                                <button onclick="viewApprovalHistory()" class="w-full text-left px-4 py-3 hover:bg-slate-50 text-blue-900 font-bold transition">Approval History</button>
+                                <button onclick="viewBillHistory()" class="w-full text-left px-4 py-3 hover:bg-slate-50 text-green-700 font-bold border-t transition">Bill History</button>
+                            </div>
+                        </div>
+
+                        ${activeUser.role === 'admin' ? `
+                            <button onclick="applyMonthlyRent()" class="bg-red-600 text-white px-5 py-3 rounded-2xl font-bold">➕ Update Rent</button>
                         ` : ''}
                         <button onclick="viewPendingList()" class="bg-orange-500 text-white px-5 py-3 rounded-2xl font-bold">Pending</button>
                     </div>
@@ -194,16 +208,29 @@
             });
         }
 
+        function applyMonthlyRent() {
+            const pass = prompt("Please enter Passkey to Update Rent:");
+            if (pass === null) return;
+            if (pass !== UPDATE_PASSKEY) { alert("Incorrect Passkey!"); return; }
+            if (!confirm("Add monthly rent amount to the pending balance of all customers?")) return;
+            Object.keys(db.slots).forEach(id => {
+                const s = db.slots[id];
+                if (s.status === 'occupied') {
+                    let currentPending = parseInt(s.pendingBalance || 0);
+                    s.pendingBalance = currentPending + parseInt(s.rent || 0);
+                }
+            });
+            save(); renderDashboard(); alert("Success! All accounts updated.");
+        }
+
         function openEditForm() {
             let occOpts = '';
             Object.keys(db.slots).forEach(id => {
                 if (db.slots[id].status === 'occupied') occOpts += `<option value="${id}">${id} - ${db.slots[id].name}</option>`;
             });
-
             showModal(`
                 <h2 class="text-2xl font-bold mb-2 text-indigo-900">Edit Application</h2>
                 <div id="editHeader" class="text-sm font-bold text-slate-400 mb-6 italic uppercase tracking-wider">Select a slot to begin editing</div>
-                
                 <div class="mb-6">
                     <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1 ml-1">1. Choose Slot Number</label>
                     <select id="editSlotSelector" onchange="populateEditForm(this.value)" class="w-full p-3 border-2 border-indigo-200 rounded-xl bg-indigo-50 font-bold outline-none focus:border-indigo-500">
@@ -211,42 +238,17 @@
                         ${occOpts}
                     </select>
                 </div>
-
                 <form id="editForm" onsubmit="submitEditRequest(event)" class="grid grid-cols-1 md:grid-cols-2 gap-4 opacity-40 pointer-events-none transition-all">
                     <input type="hidden" name="slotId" id="editSlotId">
-                    <div>
-                        <label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Customer Full Name</label>
-                        <input type="text" name="name" id="editName" class="w-full p-3 border rounded-xl" required>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Phone Number</label>
-                        <input type="tel" name="phone" id="editPhone" class="w-full p-3 border rounded-xl" required>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Alt Phone (Optional)</label>
-                        <input type="tel" name="altPhone" id="editAltPhone" class="w-full p-3 border rounded-xl">
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Car Number Plate</label>
-                        <input type="text" name="carNum" id="editCarNum" class="w-full p-3 border rounded-xl" required>
-                    </div>
-                    <div class="md:col-span-2">
-                        <label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Residential Address</label>
-                        <input type="text" name="address" id="editAddress" class="w-full p-3 border rounded-xl" required>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Aadhaar Number</label>
-                        <input type="text" name="aadhaar" id="editAadhaar" class="w-full p-3 border rounded-xl" required>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Advance Payment (₹)</label>
-                        <input type="number" name="advance" id="editAdvance" class="w-full p-3 border rounded-xl" required>
-                    </div>
-                    <div class="md:col-span-2">
-                        <label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Monthly Rent Amount (₹)</label>
-                        <input type="number" name="rent" id="editRent" class="w-full p-3 border rounded-xl" required>
-                    </div>
-                    <button type="submit" class="md:col-span-2 bg-indigo-700 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-indigo-800 transition">Update & Send Request to Admin</button>
+                    <div><label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Customer Full Name</label><input type="text" name="name" id="editName" class="w-full p-3 border rounded-xl" required></div>
+                    <div><label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Phone Number</label><input type="tel" name="phone" id="editPhone" class="w-full p-3 border rounded-xl" required></div>
+                    <div><label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Alt Phone (Optional)</label><input type="tel" name="altPhone" id="editAltPhone" class="w-full p-3 border rounded-xl"></div>
+                    <div><label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Car Number Plate</label><input type="text" name="carNum" id="editCarNum" class="w-full p-3 border rounded-xl" required></div>
+                    <div class="md:col-span-2"><label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Residential Address</label><input type="text" name="address" id="editAddress" class="w-full p-3 border rounded-xl" required></div>
+                    <div><label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Aadhaar Number</label><input type="text" name="aadhaar" id="editAadhaar" class="w-full p-3 border rounded-xl" required></div>
+                    <div><label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Advance Payment (₹)</label><input type="number" name="advance" id="editAdvance" class="w-full p-3 border rounded-xl" required></div>
+                    <div class="md:col-span-2"><label class="block text-[10px] font-bold text-blue-900 uppercase mb-1 ml-1">Monthly Rent Amount (₹)</label><input type="number" name="rent" id="editRent" class="w-full p-3 border rounded-xl" required></div>
+                    <button type="submit" class="md:col-span-2 bg-indigo-700 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-indigo-800 transition">Update & Send Request</button>
                 </form>
             `);
         }
@@ -254,11 +256,7 @@
         function populateEditForm(id) {
             const form = document.getElementById('editForm');
             const header = document.getElementById('editHeader');
-            if (!id) {
-                form.classList.add('opacity-40', 'pointer-events-none');
-                header.innerHTML = "Select a slot to begin editing";
-                return;
-            }
+            if (!id) { form.classList.add('opacity-40', 'pointer-events-none'); return; }
             const data = db.slots[id];
             document.getElementById('editSlotId').value = id;
             document.getElementById('editName').value = data.name || '';
@@ -269,8 +267,7 @@
             document.getElementById('editAadhaar').value = data.aadhaar || '';
             document.getElementById('editAdvance').value = data.advance || 0;
             document.getElementById('editRent').value = data.rent || 0;
-
-            header.innerHTML = `Editing Details For: <span class="text-indigo-700 underline">${id}</span>`;
+            header.innerHTML = `Editing: <span class="text-indigo-700 underline">${id}</span>`;
             form.classList.remove('opacity-40', 'pointer-events-none');
         }
 
@@ -278,11 +275,8 @@
             e.preventDefault();
             const fd = new FormData(e.target);
             const app = Object.fromEntries(fd.entries());
-            app.appId = Date.now();
-            app.status = 'pending';
-            app.editRequest = true;
-            db.applications.push(app);
-            save(); closeModal(); alert("Edit request sent to Admin!"); renderDashboard();
+            app.appId = Date.now(); app.status = 'pending'; app.editRequest = true;
+            db.applications.push(app); save(); closeModal(); alert("Request sent!"); renderDashboard();
         }
 
         function openAppForm() {
@@ -292,63 +286,26 @@
                 const opt = `<option value="${id}">${id}</option>`;
                 if (id.includes('Shed')) shedOpts += opt; else openOpts += opt;
             });
-
             showModal(`
                 <h2 class="text-2xl font-bold mb-6 text-blue-900">New Application</h2>
                 <form onsubmit="submitApplication(event)" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Customer Name</label>
-                        <input type="text" name="name" class="w-full p-3 border rounded-xl" required>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Phone Number</label>
-                        <input type="tel" name="phone" class="w-full p-3 border rounded-xl" required>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Alt Phone</label>
-                        <input type="tel" name="altPhone" class="w-full p-3 border rounded-xl">
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Car Number</label>
-                        <input type="text" name="carNum" class="w-full p-3 border rounded-xl" required>
-                    </div>
-                    <div class="md:col-span-2">
-                        <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Address</label>
-                        <input type="text" name="address" class="w-full p-3 border rounded-xl" required>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Aadhaar No</label>
-                        <input type="text" name="aadhaar" class="w-full p-3 border rounded-xl" required>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Monthly Rent</label>
-                        <input type="number" name="rent" class="w-full p-3 border rounded-xl" required>
-                    </div>
-                    <div class="md:col-span-2">
-                        <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Select Available Slot</label>
-                        <select name="slotId" class="w-full p-3 border rounded-xl bg-slate-50 font-bold" required>
-                            <option value="">-- Choose Slot --</option>
-                            <optgroup label="SHED AREA">${shedOpts}</optgroup>
-                            <optgroup label="OPEN AREA">${openOpts}</optgroup>
-                        </select>
-                    </div>
-                    <div class="md:col-span-2">
-                        <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Advance Payment</label>
-                        <input type="number" name="advance" class="w-full p-3 border rounded-xl" required>
-                    </div>
-                    <button type="submit" class="md:col-span-2 bg-blue-900 text-white py-4 rounded-2xl font-bold">Submit for Approval</button>
+                    <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Customer Name</label><input type="text" name="name" class="w-full p-3 border rounded-xl" required></div>
+                    <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Phone Number</label><input type="tel" name="phone" class="w-full p-3 border rounded-xl" required></div>
+                    <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Alt Phone</label><input type="tel" name="altPhone" class="w-full p-3 border rounded-xl"></div>
+                    <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Car Number</label><input type="text" name="carNum" class="w-full p-3 border rounded-xl" required></div>
+                    <div class="md:col-span-2"><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Address</label><input type="text" name="address" class="w-full p-3 border rounded-xl" required></div>
+                    <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Aadhaar No</label><input type="text" name="aadhaar" class="w-full p-3 border rounded-xl" required></div>
+                    <div><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Monthly Rent</label><input type="number" name="rent" class="w-full p-3 border rounded-xl" required></div>
+                    <div class="md:col-span-2"><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Select Slot</label><select name="slotId" class="w-full p-3 border rounded-xl bg-slate-50 font-bold" required><option value="">-- Choose --</option><optgroup label="SHED">${shedOpts}</optgroup><optgroup label="OPEN">${openOpts}</optgroup></select></div>
+                    <div class="md:col-span-2"><label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Advance Payment</label><input type="number" name="advance" class="w-full p-3 border rounded-xl" required></div>
+                    <button type="submit" class="md:col-span-2 bg-blue-900 text-white py-4 rounded-2xl font-bold">Submit</button>
                 </form>
             `);
         }
 
         function submitApplication(e) {
-            e.preventDefault();
-            const fd = new FormData(e.target);
-            const app = Object.fromEntries(fd.entries());
-            app.appId = Date.now();
-            app.status = 'pending';
-            db.applications.push(app);
-            save(); closeModal(); alert("Application submitted!"); renderDashboard();
+            e.preventDefault(); const fd = new FormData(e.target); const app = Object.fromEntries(fd.entries());
+            app.appId = Date.now(); app.status = 'pending'; db.applications.push(app); save(); closeModal(); renderDashboard();
         }
 
         function renderAdminAlerts() {
@@ -357,14 +314,8 @@
             let html = `<div class="bg-blue-50 border-2 border-blue-100 p-6 rounded-3xl mb-8"><h3 class="font-bold text-blue-900 mb-4">Pending Approvals</h3>`;
             pending.forEach(app => {
                 html += `<div class="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm mb-3">
-                    <div class="text-sm">
-                        <span class="${app.editRequest ? 'bg-indigo-600' : 'bg-green-600'} text-white px-2 py-0.5 rounded text-[9px] font-black mr-2 uppercase">${app.editRequest ? 'Edit' : 'New'}</span>
-                        <b>${app.name}</b> (${app.slotId})
-                    </div>
-                    <div class="flex gap-2">
-                        <button onclick="processApp(${app.appId}, true)" class="bg-green-600 text-white px-4 py-2 rounded-xl text-xs font-bold">Approve</button>
-                        <button onclick="processApp(${app.appId}, false)" class="bg-slate-200 text-slate-600 px-4 py-2 rounded-xl text-xs font-bold">Reject</button>
-                    </div>
+                    <div class="text-sm"><span class="${app.editRequest ? 'bg-indigo-600' : 'bg-green-600'} text-white px-2 py-0.5 rounded text-[9px] font-black mr-2 uppercase">${app.editRequest ? 'Edit' : 'New'}</span><b>${app.name}</b> (${app.slotId})</div>
+                    <div class="flex gap-2"><button onclick="processApp(${app.appId}, true)" class="bg-green-600 text-white px-4 py-2 rounded-xl text-xs font-bold">Approve</button><button onclick="processApp(${app.appId}, false)" class="bg-slate-200 text-slate-600 px-4 py-2 rounded-xl text-xs font-bold">Reject</button></div>
                 </div>`;
             });
             return html + `</div>`;
@@ -373,110 +324,138 @@
         function processApp(appId, approve) {
             const app = db.applications.find(a => a.appId === appId);
             if (approve) {
-                app.status = 'Approved';
-                const oldPaid = app.editRequest ? (db.slots[app.slotId].paid || 0) : parseInt(app.advance);
-                const oldJoin = app.editRequest ? (db.slots[app.slotId].joinDate) : new Date().toISOString();
-                db.slots[app.slotId] = { ...app, status: 'occupied', paid: oldPaid, joinDate: oldJoin };
+                app.status = 'Approved'; const existing = db.slots[app.slotId];
+                db.slots[app.slotId] = { ...app, status: 'occupied', paid: app.editRequest ? (existing.paid || 0) : 0, joinDate: app.editRequest ? (existing.joinDate) : new Date().toISOString(), pendingBalance: app.editRequest ? (existing.pendingBalance || 0) : (parseInt(app.advance) + parseInt(app.rent)) };
             } else { app.status = 'Rejected'; }
             save(); renderDashboard();
         }
 
         function openBillForm() {
             let shedOpts = '', openOpts = '';
-            Object.keys(db.slots).forEach(id => {
-                const opt = `<option value="${id}">${id} ${db.slots[id].status === 'vacant' ? '(Vacant)' : ''}</option>`;
-                if (id.includes('Shed')) shedOpts += opt; else openOpts += opt;
-            });
-            showModal(`<h2 class="text-2xl font-bold mb-6 text-green-700">Generate Bill</h2><form onsubmit="collectPayment(event, document.getElementById('billSlotId').value)" class="grid grid-cols-1 md:grid-cols-2 gap-4"><div class="md:col-span-2"><label class="text-[10px] font-bold text-slate-400 uppercase ml-1">Select Slot</label><select id="billSlotId" onchange="autoFillBillData(this.value)" class="w-full p-3 border rounded-xl bg-slate-50 font-bold" required><option value="">-- Select Slot --</option><optgroup label="SHED AREA">${shedOpts}</optgroup><optgroup label="OPEN AREA">${openOpts}</optgroup></select></div><input type="date" id="billDate" class="p-3 border rounded-xl" required value="${new Date().toISOString().split('T')[0]}"><select id="billPayMethod" class="p-3 border rounded-xl font-bold" required><option value="Cash">Cash</option><option value="Online Payment">Online Payment</option></select><input type="text" id="billName" placeholder="Customer Name" class="p-3 border rounded-xl bg-slate-100" readonly><input type="text" id="billPhone" placeholder="Phone Number" class="p-3 border rounded-xl bg-slate-100" readonly><input type="text" id="billCar" placeholder="Car Number" class="p-3 border rounded-xl bg-slate-100" readonly><input type="text" id="billAadhaar" placeholder="Aadhaar Number" class="p-3 border rounded-xl bg-slate-100" readonly><input type="text" id="billRent" placeholder="Monthly Rent" class="p-3 border rounded-xl bg-slate-100" readonly><input type="text" id="billAddress" placeholder="Address" class="p-3 border rounded-xl bg-slate-100 md:col-span-2" readonly><div class="md:col-span-2"><label class="text-[10px] font-bold text-slate-400 uppercase ml-1">Payment Amount ₹</label><input type="number" name="amt" id="billAmount" placeholder="Enter Amount" class="w-full p-4 border-2 border-green-500 rounded-xl text-xl font-bold" required></div><button type="submit" class="md:col-span-2 bg-green-700 text-white py-4 rounded-2xl font-bold">Generate & Record Payment</button></form>`);
+            Object.keys(db.slots).forEach(id => { const opt = `<option value="${id}">${id}</option>`; if (id.includes('Shed')) shedOpts += opt; else openOpts += opt; });
+            showModal(`<h2 class="text-2xl font-bold mb-6 text-green-700">Generate Bill</h2><form onsubmit="collectPayment(event, document.getElementById('billSlotId').value)" class="grid grid-cols-1 md:grid-cols-2 gap-4"><div class="md:col-span-2"><label class="text-[10px] font-bold text-slate-400 uppercase">Select Slot</label><select id="billSlotId" onchange="autoFillBillData(this.value)" class="w-full p-3 border rounded-xl" required><option value="">-- Select --</option><optgroup label="SHED">${shedOpts}</optgroup><optgroup label="OPEN">${openOpts}</optgroup></select></div><input type="date" id="billDate" class="p-3 border rounded-xl" required value="${new Date().toISOString().split('T')[0]}"><select id="billPayMethod" class="p-3 border rounded-xl font-bold" required><option value="Cash">Cash</option><option value="Online">Online</option></select><input type="text" id="billName" placeholder="Name" class="p-3 border rounded-xl bg-slate-100" readonly><input type="text" id="billPhone" placeholder="Phone" class="p-3 border rounded-xl bg-slate-100" readonly><input type="text" id="billCar" placeholder="Car" class="p-3 border rounded-xl bg-slate-100" readonly><input type="text" id="billAadhaar" placeholder="Aadhaar" class="p-3 border rounded-xl bg-slate-100" readonly><input type="text" id="billRent" placeholder="Rent" class="p-3 border rounded-xl bg-slate-100" readonly><input type="text" id="billAddress" placeholder="Address" class="p-3 border rounded-xl bg-slate-100 md:col-span-2" readonly><div class="md:col-span-2"><input type="number" name="amt" id="billAmount" placeholder="Enter Amount" class="w-full p-4 border-2 border-green-500 rounded-xl text-xl font-bold" required></div><button type="submit" class="md:col-span-2 bg-green-700 text-white py-4 rounded-2xl font-bold">Generate</button></form>`);
         }
 
         function autoFillBillData(id) {
-            if (!id) return;
-            const slot = db.slots[id];
-            if (slot.status === 'occupied') {
-                document.getElementById('billName').value = slot.name || '';
-                document.getElementById('billPhone').value = slot.phone || '';
-                document.getElementById('billCar').value = slot.carNum || '';
-                document.getElementById('billAadhaar').value = slot.aadhaar || '';
-                document.getElementById('billAddress').value = slot.address || '';
-                document.getElementById('billRent').value = "Rent: ₹" + (slot.rent || 0);
-            }
+            const s = db.slots[id]; if (s && s.status === 'occupied') { document.getElementById('billName').value = s.name; document.getElementById('billPhone').value = s.phone; document.getElementById('billCar').value = s.carNum; document.getElementById('billAadhaar').value = s.aadhaar; document.getElementById('billAddress').value = s.address; document.getElementById('billRent').value = "₹" + s.rent; }
         }
 
-        function collectPayment(e, id) {
-            e.preventDefault();
-            const amtInput = e.target.amt || document.getElementById('billAmount');
-            db.slots[id].paid += parseInt(amtInput.value);
-            save(); closeModal(); renderDashboard(); alert("Payment Recorded!");
+        function collectPayment(e, id) { 
+            e.preventDefault(); 
+            const amt = parseInt(document.getElementById('billAmount').value); 
+            const date = document.getElementById('billDate').value;
+            const method = document.getElementById('billPayMethod').value;
+            db.billHistory.push({ slotId: id, name: db.slots[id].name, amount: amt, date: date, method: method });
+            db.slots[id].paid = (parseInt(db.slots[id].paid) || 0) + amt; 
+            db.slots[id].pendingBalance = (parseInt(db.slots[id].pendingBalance) || 0) - amt; 
+            save(); closeModal(); renderDashboard(); alert("Payment Recorded!"); 
         }
 
-        function viewRequestHistory() {
-            let list = db.applications.map(app => {
-                const colors = { 'pending': 'bg-yellow-100 text-yellow-700', 'Approved': 'bg-green-100 text-green-700', 'Rejected': 'bg-red-100 text-red-700' };
-                return `<tr class="border-b"><td class="p-3"><b>${app.name}</b><br><span class="text-[10px] opacity-50 uppercase">${app.editRequest ? 'Edit Request' : 'New Join'}</span></td><td class="p-3 font-bold">${app.slotId}</td><td class="p-3"><span class="px-2 py-1 rounded text-[10px] font-black uppercase ${colors[app.status]}">${app.status}</span></td></tr>`;
-            }).join('');
-            showModal(`<h2 class="text-xl font-black mb-4 text-indigo-900">History</h2><div class="max-h-96 overflow-y-auto"><table class="w-full text-left text-sm"><thead><tr class="bg-slate-50"><th class="p-3">Customer</th><th class="p-3">Slot</th><th class="p-3">Status</th></tr></thead><tbody>${list || '<tr><td colspan="3" class="p-6 text-center">No history</td></tr>'}</tbody></table></div>`);
+        function viewApprovalHistory() {
+            let list = [...db.applications].reverse().map(app => `<tr class="border-b"><td class="p-3"><b>${app.name}</b><br><span class="text-[10px] opacity-50 uppercase">${app.editRequest ? 'Edit' : 'New'}</span></td><td class="p-3 font-bold">${app.slotId}</td><td class="p-3"><span class="px-2 py-1 rounded text-[10px] font-black uppercase ${app.status === 'Approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${app.status}</span></td></tr>`).join('');
+            showModal(`<h2 class="text-xl font-black mb-4 text-indigo-900">Approval History</h2><div class="max-h-96 overflow-y-auto"><table class="w-full text-left text-sm"><thead><tr class="bg-slate-50"><th class="p-3">Customer</th><th class="p-3">Slot</th><th class="p-3">Status</th></tr></thead><tbody>${list || '<tr><td colspan="3" class="p-6 text-center">No history</td></tr>'}</tbody></table></div>`);
         }
 
-        // --- UPDATED PENDING LOGIC ---
+        function viewBillHistory() {
+            let list = [...db.billHistory].reverse().map(b => `<tr class="border-b"><td class="p-3"><b>${b.name}</b><br><span class="text-[10px] opacity-50 uppercase">${b.slotId}</span></td><td class="p-3 font-bold text-green-600">₹${b.amount}</td><td class="p-3"><span class="text-[10px] block opacity-50 uppercase font-bold">${b.method}</span>${b.date}</td></tr>`).join('');
+            showModal(`<h2 class="text-xl font-black mb-4 text-green-700">Bill History</h2><div class="max-h-96 overflow-y-auto"><table class="w-full text-left text-sm"><thead><tr class="bg-slate-50"><th class="p-3">Customer</th><th class="p-3">Amount</th><th class="p-3">Date</th></tr></thead><tbody>${list || '<tr><td colspan="3" class="p-6 text-center">No bills generated</td></tr>'}</tbody></table></div>`);
+        }
+
         function viewPendingList() {
-            let list = '';
-            const today = new Date();
-            
-            Object.keys(db.slots).forEach(id => {
-                const s = db.slots[id];
-                if (s.status === 'occupied') {
-                    // Calculate months between Join Date and Today
-                    const joinDate = new Date(s.joinDate);
-                    const diffMonths = (today.getFullYear() - joinDate.getFullYear()) * 12 + (today.getMonth() - joinDate.getMonth());
-                    
-                    // Total Payable = (Monthly Rent * months elapsed) + Initial Advance/Deposit
-                    // Subtract Total Paid to get Current Pending
-                    const totalPayable = (parseInt(s.rent) * Math.max(0, diffMonths)) + parseInt(s.advance);
-                    const pendingAmt = totalPayable - parseInt(s.paid || 0);
-                    
-                    list += `<tr>
-                        <td class="p-3 border-b">${id}</td>
-                        <td class="p-3 border-b">${s.name}</td>
-                        <td class="p-3 border-b text-red-600 font-bold">₹${pendingAmt}</td>
-                    </tr>`;
-                }
-            });
+            let list = ''; Object.keys(db.slots).forEach(id => { const s = db.slots[id]; if (s.status === 'occupied') list += `<tr><td class="p-3 border-b">${id}</td><td class="p-3 border-b">${s.name}</td><td class="p-3 border-b text-red-500 font-bold">₹${s.pendingBalance || 0}</td></tr>`; });
+            showModal(`<h3 class="text-xl font-black mb-4">Pending List</h3><table class="w-full text-left text-sm"><thead><tr class="bg-slate-100"><th class="p-3">Slot</th><th class="p-3">Customer</th><th class="p-3">Total Pending</th></tr></thead><tbody>${list || '<tr><td colspan="3" class="p-6 text-center opacity-30">No active tenants</td></tr>'}</tbody></table>`);
+        }
 
-            showModal(`
-                <h3 class="text-xl font-black mb-4">Pending Rental List</h3>
-                <div class="max-h-96 overflow-y-auto">
-                    <table class="w-full text-left text-sm">
-                        <thead>
-                            <tr class="bg-slate-100">
-                                <th class="p-3">Slot</th>
-                                <th class="p-3">Customer</th>
-                                <th class="p-3">Pending</th>
-                            </tr>
-                        </thead>
-                        <tbody>${list || '<tr><td colspan="3" class="p-6 text-center opacity-30">No active tenants</td></tr>'}</tbody>
-                    </table>
-                </div>
-            `);
+        function editPendingBalance(id) {
+            const s = db.slots[id];
+            const newPending = prompt(`Adjust Pending Balance for ${id} (${s.name}):`, s.pendingBalance || 0);
+            if (newPending !== null && !isNaN(newPending)) {
+                s.pendingBalance = parseInt(newPending);
+                save(); renderDashboard(); closeModal(); alert("Pending balance updated successfully.");
+            }
         }
 
         function viewSlot(id) {
             const slot = db.slots[id];
             if (slot.status === 'vacant') return;
-            const months = Math.max(0, ((new Date().getFullYear() - new Date(slot.joinDate).getFullYear()) * 12 + (new Date().getMonth() - new Date(slot.joinDate).getMonth())));
-            const pending = (months * parseInt(slot.rent)) + parseInt(slot.advance) - parseInt(slot.paid);
-            showModal(`<h2 class="text-3xl font-black text-blue-900 text-center mb-1">${id}</h2><p class="text-center text-2xl font-black uppercase text-slate-800 mb-6">${slot.name}</p><div class="grid grid-cols-2 gap-4 text-sm mb-6 bg-slate-50 p-6 rounded-3xl"><div><span class="block text-[10px] opacity-50">Car</span><b>${slot.carNum}</b></div><div><span class="block text-[10px] opacity-50">Phone</span><b>${slot.phone}</b></div><div class="col-span-2 border-t pt-2"><span class="block text-[10px] opacity-50">Address</span><b>${slot.address || 'N/A'}</b></div><div class="text-blue-600 border-t pt-2"><span>Monthly Rent:</span> <b>₹${slot.rent}</b></div><div class="text-red-600 border-t pt-2"><span>Pending:</span> <b>₹${pending}</b></div></div>`);
+            const pending = slot.pendingBalance || 0;
+            showModal(`
+                <h2 class="text-3xl font-black text-blue-900 text-center mb-1">${id}</h2>
+                <p class="text-center text-2xl font-black uppercase text-slate-800 mb-6">${slot.name}</p>
+                <div class="grid grid-cols-2 gap-4 text-sm mb-6 bg-slate-50 p-6 rounded-3xl">
+                    <div><span class="block text-[10px] opacity-50 uppercase font-bold">Car Plate</span><b>${slot.carNum}</b></div>
+                    <div><span class="block text-[10px] opacity-50 uppercase font-bold">Phone No</span><b class="text-blue-700">${slot.phone}</b></div>
+                    <div class="col-span-2 border-t pt-2"><span class="block text-[10px] opacity-50 uppercase font-bold">Aadhaar No</span><b class="tracking-widest">${slot.aadhaar}</b></div>
+                    <div class="col-span-2 border-t pt-2"><span class="block text-[10px] opacity-50 uppercase font-bold">Address</span><b>${slot.address || 'N/A'}</b></div>
+                    <div class="text-indigo-600 border-t pt-2"><span class="block text-[10px] opacity-50 uppercase font-bold">Advance Payment</span><b>₹${slot.advance || 0}</b></div>
+                    <div class="text-blue-600 border-t pt-2"><span class="block text-[10px] opacity-50 uppercase font-bold">Monthly Rent</span><b>₹${slot.rent}</b></div>
+                    <div class="text-red-600 border-t pt-2 col-span-2 flex justify-between items-end">
+                        <div>
+                            <span class="block text-[10px] opacity-50 uppercase font-bold">Total Pending Due</span>
+                            <b class="text-lg">₹${pending}</b>
+                        </div>
+                        ${activeUser.role === 'admin' ? `<button onclick="editPendingBalance('${id}')" class="bg-red-500 text-white px-3 py-1 rounded-lg text-[10px] font-black uppercase shadow-sm">Edit Pending</button>` : ''}
+                    </div>
+                </div>
+            `);
         }
 
         function renderCustomerDash(main) {
             const slot = db.slots[activeUser.slotId];
-            main.innerHTML = `<div class="max-w-xl mx-auto bg-white p-8 rounded-[3rem] shadow-2xl border-t-8 border-blue-900"><div class="text-center mb-8"><div class="text-5xl font-black text-blue-900">${activeUser.slotId}</div><p class="text-slate-400 font-bold uppercase text-xs mt-2">Allotted for ${slot.name}</p></div><div class="space-y-4"><div class="bg-slate-50 p-4 rounded-2xl flex justify-between"><span>Car No</span><b>${slot.carNum}</b></div><div class="bg-blue-900 p-6 rounded-[2rem] text-white flex justify-between shadow-xl"><span>Paid Balance</span><span class="text-2xl font-black italic">₹${slot.paid}</span></div></div></div>`;
+            main.innerHTML = `
+                <div class="max-w-2xl mx-auto space-y-6">
+                    <div class="bg-white p-8 rounded-[3rem] shadow-2xl border-t-8 border-blue-900">
+                        <div class="text-center mb-8">
+                            <div class="text-5xl font-black text-blue-900">${activeUser.slotId}</div>
+                            <p class="text-slate-400 font-bold uppercase text-xs mt-2">Occupied by ${slot.name}</p>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                            <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                                <span class="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Phone Number</span>
+                                <span class="text-lg font-bold">${slot.phone}</span>
+                            </div>
+                            <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                                <span class="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Car Number</span>
+                                <span class="text-lg font-bold">${slot.carNum}</span>
+                            </div>
+                            <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                                <span class="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Aadhaar Card</span>
+                                <span class="text-lg font-bold tracking-widest">${slot.aadhaar}</span>
+                            </div>
+                            <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                                <span class="block text-[10px] font-black text-indigo-500 uppercase tracking-widest">Advance Payment</span>
+                                <span class="text-lg font-bold">₹${slot.advance || 0}</span>
+                            </div>
+                            <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                                <span class="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Monthly Rent</span>
+                                <span class="text-lg font-bold">₹${slot.rent}</span>
+                            </div>
+                            <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100 md:col-span-2">
+                                <span class="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Residential Address</span>
+                                <span class="text-sm font-bold">${slot.address}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-red-600 p-8 rounded-[2.5rem] text-white flex justify-between items-center shadow-2xl overflow-hidden relative">
+                        <div class="relative z-10">
+                            <span class="block text-xs font-black uppercase opacity-60">Pending Balance Dues</span>
+                            <span class="text-4xl font-black italic">₹${slot.pendingBalance || 0}</span>
+                        </div>
+                        <div class="opacity-20 transform scale-150 relative z-10">
+                           <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                           </svg>
+                        </div>
+                    </div>
+                </div>`;
         }
 
         function showModal(html) { document.getElementById('modalBody').innerHTML = html; document.getElementById('modal').classList.remove('hidden'); }
         function closeModal() { document.getElementById('modal').classList.add('hidden'); }
-
-        initDB();
+        
+        initDB(); 
         updateClock();
     </script>
 </body>
