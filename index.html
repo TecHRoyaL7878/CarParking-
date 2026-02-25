@@ -203,6 +203,8 @@
         const UPDATE_PASSKEY = "1234";
         let db = JSON.parse(localStorage.getItem('RP_DB')) || { slots: {}, applications: [], billHistory: [], removalHistory: [] };
         let activeUser = null;
+          /* --- PASTE THIS AT LINE 395 --- */
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxkDL0IAqXEW36uPyzt29-oCPXK9J83ABVNNzg4WXHXWAbpIA9ZkMWR3lcufSaxe3sltg/exec";
 
         function updateClock() {
             const now = new Date();
@@ -591,3 +593,4 @@
     </script>
 </body>
 </html>
+
