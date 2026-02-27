@@ -227,8 +227,24 @@
             save();
         }
 
-        function save() { localStorage.setItem('RP_DB', JSON.stringify(db)); }
+      // This single change handles syncing for ALL features
+function save() {
+    // 1. Keep the existing local storage save
+    localStorage.setItem('RP_DB', JSON.stringify(db)); 
 
+    // 2. Add this part to push data to Google Sheets
+    const payload = {
+        action: 'sync_all_data',
+        db: db // This sends everything: slots, history, and applications
+    };
+
+    fetch(SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors', // Use 'no-cors' to avoid browser security blocks
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    }).catch(err => console.log("Sync failed, will try again next time."));
+}
         function toggleLoginTab(type) {
             document.getElementById('staffLoginForm').classList.toggle('hidden', type !== 'staff');
             document.getElementById('customerLoginForm').classList.toggle('hidden', type !== 'customer');
@@ -593,4 +609,3 @@
     </script>
 </body>
 </html>
-
