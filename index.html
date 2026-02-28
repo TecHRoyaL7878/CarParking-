@@ -240,7 +240,7 @@ function save() {
 
     fetch(SCRIPT_URL, {
         method: 'POST',
-        // Use 'no-cors' to avoid browser security blocks
+        mode: 'no-cors', // Use 'no-cors' to avoid browser security blocks
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
     }).catch(err => console.log("Sync failed, will try again next time."));
@@ -605,27 +605,7 @@ function save() {
 
         function showModal(html) { document.getElementById('modalBody').innerHTML = html; document.getElementById('modal').classList.remove('hidden'); }
         function closeModal() { document.getElementById('modal').classList.add('hidden'); }
-        initDB();
-updateClock();
-loadFromServer();
-
-// Auto-sync every 5 seconds
-setInterval(loadFromServer, 5000);
-        function loadFromServer() {
-  fetch(SCRIPT_URL)
-    .then(res => res.json())
-    .then(serverDB => {
-
-      // Compare old and new data
-      if (JSON.stringify(serverDB) !== JSON.stringify(db)) {
-        db = serverDB;
-        localStorage.setItem('RP_DB', JSON.stringify(db));
-        renderDashboard();
-      }
-
-    })
-    .catch(err => console.log("Server sync failed"));
-}
+        initDB(); updateClock();
     </script>
 </body>
 </html>
